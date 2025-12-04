@@ -1,6 +1,3 @@
-Perfecto, acá tenés un `README.md` listo para pegar y commitear.
-
-````markdown
 # Chatbot Normativo FCyT – Baseline 2025
 
 Este proyecto implementa un **chatbot normativo** para la Facultad de Ciencias y Tecnologías (FCyT – UNCA), que permite hacer consultas sobre distintos reglamentos y documentos institucionales a partir de un corpus de archivos PDF.
