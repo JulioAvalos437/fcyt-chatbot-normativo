@@ -14,7 +14,7 @@ El proyecto permite consultar documentos normativos de la FCyT utilizando pregun
 1. **Carga todos los PDFs** ubicados en la carpeta `docs/`.
 2. **Extrae el texto** de cada documento.
 3. **Divide el contenido en fragmentos** (chunks) manejables.
-4. **Convierte cada fragmento en un vector numérico** mediante la técnica TF-IDF.
+4. **Convierte cada fragmento en un vector numérico** mediante la técnica TF-IDF (Term Frequency – Inverse Document Frequency).
 5. **Construye un índice de búsqueda local**, sin depender de servicios externos.
 6. Cuando el usuario realiza una consulta:
    - La pregunta se vectoriza.
