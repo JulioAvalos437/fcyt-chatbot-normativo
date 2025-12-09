@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Chatbot normativo FCyT</title>
-    <style>
+<head>
+    <meta charset="UTF-8">
+    <title>Chatbot de Documentos</title>
+        <style>
       body {
         font-family: system-ui, sans-serif;
         max-width: 900px;
@@ -36,82 +36,125 @@
         color: #999;
       }
     </style>
-  </head>
-  <body>
-    <h1>Chatbot normativo FCyT</h1>
-    <p>
-      Preguntá sobre reglamento académico o de PFG. (Versión demo basada en
-      búsqueda TF-IDF).
-    </p>
+</head>
+<body>
 
-    <label for="question">Pregunta:</label>
-    <textarea
-      id="question"
-      placeholder="Ej: ¿Cuál es la función del docente de la materia PFG?"
-    ></textarea>
-    <br />
-    <button onclick="enviarPregunta()">Consultar</button>
+    <h1>Chatbot de Documentos FCyT</h1>
+    
+    <div>
+        <h2>Subir y Actualizar Índice (PDFs)</h2>
+        <form id="uploadForm">
+            <p>Selecciona uno o más PDFs para crear/reemplazar el índice de documentos.</p>
+            <input type="file" id="pdfFiles" name="files" accept=".pdf" multiple required>
+            <button type="submit">Generar Nuevo Índice</button>
+        </form>
+        <div id="uploadMessage" class="message" style="display:none;"></div>
+    </div>
 
-    <div id="resultados"></div>
+    <hr> <div>
+        <h2>Hacer una Pregunta</h2>
+        <form id="askForm">
+            <input type="text" id="question" placeholder="Escribe tu pregunta aquí..." required>
+            <button type="submit">Buscar Respuesta</button>
+        </form>
+        <div id="results"></div>
+    </div>
 
     <script>
-      async function enviarPregunta() {
-        const q = document.getElementById("question").value.trim();
-        const contResultados = document.getElementById("resultados");
-        contResultados.innerHTML = "";
+        // --- Lógica para el Formulario de Subida ---
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadMessage = document.getElementById('uploadMessage');
 
-        if (!q) {
-          contResultados.innerHTML = "<p>Escribí una pregunta.</p>";
-          return;
-        }
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('pdfFiles');
+            const files = fileInput.files;
 
-        contResultados.innerHTML = "<p>Buscando...</p>";
+            if (files.length === 0) {
+                alert("Por favor, selecciona al menos un archivo PDF.");
+                return;
+            }
 
-        try {
-          const resp = await fetch("/ask", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ question: q }),
-          });
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            
+            uploadMessage.style.display = 'block';
+            uploadMessage.className = 'message';
+            uploadMessage.innerHTML = 'Procesando archivos y generando índice... Esto puede tardar.';
 
-          if (!resp.ok) {
-            contResultados.innerHTML = "<p>Error al consultar el servidor.</p>";
-            return;
-          }
+            try {
+                const response = await fetch('/upload-pdfs', {
+                    method: 'POST',
+                    body: formData,
+                });
 
-          const data = await resp.json();
-          contResultados.innerHTML = "";
+                const data = await response.json();
+                
+                if (response.ok) {
+                    uploadMessage.className = 'message success';
+                    uploadMessage.innerHTML = data.message;
+                    fileInput.value = ''; 
+                } else {
+                    uploadMessage.className = 'message error';
+                    uploadMessage.innerHTML = 'Error: ' + (data.detail || 'Fallo desconocido.');
+                }
+            } catch (error) {
+                uploadMessage.className = 'message error';
+                uploadMessage.innerHTML = 'Error de conexión: ' + error.message;
+            }
+        });
 
-          if (!data.resultados || data.resultados.length === 0) {
-            contResultados.innerHTML = "<p>No se encontraron resultados.</p>";
-            return;
-          }
+        // --- Lógica para el Formulario del Chatbot ---
+        const askForm = document.getElementById('askForm');
+        const resultsDiv = document.getElementById('results');
 
-          data.resultados.forEach((r, i) => {
-            const div = document.createElement("div");
-            div.className = "resultado";
+        askForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const questionInput = document.getElementById('question');
+            const question = questionInput.value.trim();
 
-            const textoCorto =
-              r.texto.length > 500 ? r.texto.slice(0, 500) + "..." : r.texto;
+            if (!question) return;
 
-            div.innerHTML = `
-                        <div class="fuente"><strong>[${i + 1}] ${
-              r.fuente
-            }</strong>
-                            <span class="score">(score: ${r.score.toFixed(
-                              3
-                            )})</span>
-                        </div>
-                        <div>${textoCorto.replace(/\n/g, " ")}</div>
-                    `;
-            contResultados.appendChild(div);
-          });
-        } catch (e) {
-          contResultados.innerHTML = "<p>Error en la petición: " + e + "</p>";
-        }
-      }
+            resultsDiv.innerHTML = '<p>Buscando respuesta...</p>';
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: question }),
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultsDiv.innerHTML = '';
+                    if (data.resultados && data.resultados.length > 0) {
+                        data.resultados.forEach((r, index) => {
+                            const resultElement = document.createElement('div');
+                            resultElement.className = 'respuesta';
+                            resultElement.innerHTML = `
+                                <strong>${index + 1}. ${r.texto}</strong>
+                                <div class="score">Fuente: ${r.fuente} (Similitud: ${r.score.toFixed(3)})</div>
+                            `;
+                            resultsDiv.appendChild(resultElement);
+                        });
+                    } else {
+                        resultsDiv.innerHTML = '<p>No se encontraron resultados relevantes.</p>';
+                    }
+                } else {
+                    resultsDiv.innerHTML = `<p style="color:red;">Error del servidor: ${response.statusText}</p>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<p style="color:red;">Error de conexión: ${error.message}</p>`;
+            }
+        });
     </script>
-  </body>
+
+</body>
 </html>
