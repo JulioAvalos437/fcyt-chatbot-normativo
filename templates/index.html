@@ -1,237 +1,131 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>Chatbot de Documentos</title>
-            <style>
-      body {
-        font-family: system-ui, sans-serif;
-        max-width: 900px;
-        margin: 2rem auto;
-        padding: 0 1rem;
-      }
-      textarea {
-        width: 100%;
-        height: 80px;
-        font-size: 1rem;
-      }
-      button {
-        padding: 0.5rem 1rem;
-        margin-top: 0.5rem;
-        cursor: pointer;
-      }
-      .resultado {
-        margin-top: 1rem;
-        padding: 0.75rem;
-        border-radius: 6px;
-        border: 1px solid #ddd;
-        background: #f9f9f9;
-      }
-      .fuente {
-        font-size: 0.85rem;
-        color: #555;
-      }
-      .score {
-        font-size: 0.8rem;
-        color: #999;
-      }
-    </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chatbot normativo FCyT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body onload="loadPdfList()">
-
-    <h1>Chatbot de Documentos FCyT</h1>
-    
-    <div>
-        <h2>Agregar PDFs al Índice</h2>
-        <form id="uploadForm">
-            <p>Selecciona uno o más PDFs para **agregar** al índice existente.</p>
-            <input type="file" id="pdfFiles" name="files" accept=".pdf" multiple required>
-            <button type="submit">Agregar y Regenerar Índice</button>
-        </form>
-        <div id="uploadMessage" class="message" style="display:none;"></div>
-    </div>
-    <div>
-        <h2>Documentos Cargados</h2>
-        <div id="pdfListContainer">
-            <p>Cargando documentos...</p>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto max-w-4xl p-6">
+        <!-- Header -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <h1 class="text-4xl font-bold text-gray-800">Chatbot Normativo</h1>
+                </div>
+                <a href="/manage-pdfs" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+                    Gestionar PDFs
+                </a>
+            </div>
+            <p class="text-gray-600">Preguntá sobre reglamento académico o de PFG - Búsqueda con IA</p>
         </div>
-        <div id="deleteMessage" class="message" style="display:none;"></div>
-    </div>
-    <div>
-        <h2>Hacer una Pregunta</h2>
-        <form id="askForm">
-            <input type="text" id="question" placeholder="Escribe tu pregunta aquí..." required>
-            <button type="submit">Buscar Respuesta</button>
-        </form>
-        <div id="results"></div>
+
+        <!-- Tarjeta principal -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <div class="mb-6">
+                <label for="question" class="block text-lg font-semibold text-gray-800 mb-3">
+                    Tu pregunta:
+                </label>
+                <textarea 
+                    id="question" 
+                    placeholder="Ej: ¿Cuál es la función del docente de la materia PFG?"
+                    class="w-full h-24 p-4 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition resize-none"
+                ></textarea>
+            </div>
+
+            <button 
+                onclick="enviarPregunta()" 
+                class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md hover:shadow-lg"
+            >
+                Consultar
+            </button>
+
+            <!-- Resultado -->
+            <div id="resultados" class="mt-8"></div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-gray-500 text-sm">
+            <p>Versión demo basada en búsqueda semántica con TF-IDF</p>
+        </div>
     </div>
 
     <script>
-        // --- FUNCIONES DE GESTIÓN DE PDFS ---
-        const pdfListContainer = document.getElementById('pdfListContainer');
-        const deleteMessage = document.getElementById('deleteMessage');
+        async function enviarPregunta() {
+            const q = document.getElementById("question").value.trim();
+            const contResultados = document.getElementById("resultados");
+            contResultados.innerHTML = "";
 
-        // Función para cargar la lista de PDFs
-        async function loadPdfList() {
+            if (!q) {
+                mostrarError("Escribí una pregunta");
+                return;
+            }
+
+            mostrarCargando();
+
             try {
-                const response = await fetch('/list-pdfs');
-                const data = await response.json();
-                
-                pdfListContainer.innerHTML = ''; // Limpiar lista
-                
-                if (data.files && data.files.length > 0) {
-                    data.files.forEach(filename => {
-                        const listItem = document.createElement('div');
-                        listItem.className = 'pdf-list-item';
-                        listItem.innerHTML = `
-                            <span>${filename}</span>
-                            <button class="delete-btn" data-filename="${filename}">Eliminar</button>
+                const resp = await fetch("/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: q })
+                });
+
+                if (!resp.ok) {
+                    mostrarError("Error al consultar el servidor");
+                    return;
+                }
+
+                const data = await resp.json();
+                contResultados.innerHTML = "";
+
+                if (data.resultados && data.resultados.length > 0) {
+                    data.resultados.forEach((r, i) => {
+                        const textoCorto = r.texto.length > 500
+                            ? r.texto.slice(0, 500) + "..."
+                            : r.texto;
+
+                        const div = document.createElement("div");
+                        div.className = "mt-6 p-6 bg-gradient-to-r from-indigo-50 to-blue-50 border-l-4 border-indigo-600 rounded-lg shadow-md";
+                        div.innerHTML = `
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <span class="inline-block bg-indigo-600 text-white font-bold rounded-full w-8 h-8 flex items-center justify-center mr-3">${i+1}</span>
+                                    <span class="font-semibold text-gray-800">${r.fuente}</span>
+                                </div>
+                                <span class="text-xs bg-gray-200 text-gray-700 px-3 py-1 rounded-full">Score: ${r.score.toFixed(3)}</span>
+                            </div>
+                            <p class="text-gray-700 leading-relaxed">${textoCorto.replace(/\n/g, " ")}</p>
                         `;
-                        pdfListContainer.appendChild(listItem);
-                    });
-
-                    // Añadir evento a los botones de eliminar
-                    document.querySelectorAll('.delete-btn').forEach(button => {
-                        button.addEventListener('click', handleDelete);
+                        contResultados.appendChild(div);
                     });
                 } else {
-                    pdfListContainer.innerHTML = '<p>No hay documentos cargados actualmente.</p>';
+                    mostrarError("No se encontraron resultados");
                 }
-            } catch (error) {
-                pdfListContainer.innerHTML = '<p class="error">Error al cargar la lista de documentos.</p>';
+
+            } catch (e) {
+                mostrarError("Error en la petición: " + e);
             }
         }
 
-        // Función para manejar la eliminación
-        async function handleDelete(e) {
-            const filename = e.target.dataset.filename;
-            if (!confirm(`¿Estás seguro de que quieres eliminar '${filename}' y regenerar el índice?`)) {
-                return;
-            }
-
-            deleteMessage.style.display = 'block';
-            deleteMessage.className = 'message';
-            deleteMessage.innerHTML = `Eliminando ${filename} y regenerando índice...`;
-
-            try {
-                const response = await fetch('/delete-pdf', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: filename }),
-                });
-
-                const data = await response.json();
-                
-                if (response.ok) {
-                    deleteMessage.className = 'message success';
-                    deleteMessage.innerHTML = data.message;
-                    loadPdfList(); // Recargar la lista de archivos
-                } else {
-                    deleteMessage.className = 'message error';
-                    deleteMessage.innerHTML = 'Error al eliminar: ' + (data.detail || 'Fallo desconocido.');
-                }
-            } catch (error) {
-                deleteMessage.className = 'message error';
-                deleteMessage.innerHTML = 'Error de conexión durante la eliminación: ' + error.message;
-            }
+        function mostrarCargando() {
+            const contResultados = document.getElementById("resultados");
+            contResultados.innerHTML = `
+                <div class="mt-8 flex items-center justify-center">
+                    <div class="animate-spin">⏳</div>
+                    <p class="ml-3 text-gray-600">Buscando respuesta...</p>
+                </div>
+            `;
         }
-        
-        // --- Lógica para el Formulario de Subida (Modificada para recargar lista) ---
-        const uploadForm = document.getElementById('uploadForm');
-        const uploadMessage = document.getElementById('uploadMessage');
 
-        uploadForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const fileInput = document.getElementById('pdfFiles');
-            const files = fileInput.files;
-
-            if (files.length === 0) {
-                alert("Por favor, selecciona al menos un archivo PDF.");
-                return;
-            }
-
-            const formData = new FormData();
-            for (let i = 0; i < files.length; i++) {
-                formData.append('files', files[i]);
-            }
-            
-            uploadMessage.style.display = 'block';
-            uploadMessage.className = 'message';
-            uploadMessage.innerHTML = 'Procesando archivos, agregando al índice y regenerando...';
-
-            try {
-                const response = await fetch('/upload-pdfs', {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                const data = await response.json();
-                
-                if (response.ok) {
-                    uploadMessage.className = 'message success';
-                    uploadMessage.innerHTML = data.message;
-                    fileInput.value = ''; 
-                    loadPdfList(); // <-- ¡NUEVO! Recargar la lista después de subir
-                } else {
-                    uploadMessage.className = 'message error';
-                    uploadMessage.innerHTML = 'Error: ' + (data.detail || 'Fallo desconocido.');
-                }
-            } catch (error) {
-                uploadMessage.className = 'message error';
-                uploadMessage.innerHTML = 'Error de conexión: ' + error.message;
-            }
-        });
-
-        // --- Lógica para el Formulario del Chatbot (sin cambios) ---
-        const askForm = document.getElementById('askForm');
-        const resultsDiv = document.getElementById('results');
-
-        askForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const questionInput = document.getElementById('question');
-            const question = questionInput.value.trim();
-
-            if (!question) return;
-
-            resultsDiv.innerHTML = '<p>Buscando respuesta...</p>';
-
-            try {
-                const response = await fetch('/ask', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: question }),
-                });
-
-                const data = await response.json();
-                
-                if (response.ok) {
-                    resultsDiv.innerHTML = '';
-                    if (data.resultados && data.resultados.length > 0) {
-                        data.resultados.forEach((r, index) => {
-                            const resultElement = document.createElement('div');
-                            resultElement.className = 'respuesta';
-                            resultElement.innerHTML = `
-                                <strong>${index + 1}. ${r.texto}</strong>
-                                <div class="score">Fuente: ${r.fuente} (Similitud: ${r.score.toFixed(3)})</div>
-                            `;
-                            resultsDiv.appendChild(resultElement);
-                        });
-                    } else {
-                        resultsDiv.innerHTML = '<p>No se encontraron resultados relevantes.</p>';
-                    }
-                } else {
-                    resultsDiv.innerHTML = `<p style="color:red;">Error del servidor: ${response.statusText}</p>`;
-                }
-            } catch (error) {
-                resultsDiv.innerHTML = `<p style="color:red;">Error de conexión: ${error.message}</p>`;
-            }
-        });
-        
-        // Cargar la lista de PDFs al cargar la página
-        // La función `loadPdfList()` se llama con `onload` en la etiqueta <body>
+        function mostrarError(mensaje) {
+            const contResultados = document.getElementById("resultados");
+            contResultados.innerHTML = `
+                <div class="mt-8 p-4 bg-red-50 text-red-800 border border-red-300 rounded-lg">
+                    ⚠️ ${mensaje}
+                </div>
+            `;
+        }
     </script>
-
 </body>
 </html>

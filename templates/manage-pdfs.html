@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gestionar PDFs - Chatbot normativo FCyT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto max-w-4xl p-6">
+        <!-- Header -->
+        <div class="mb-8">
+            <div class="flex items-center gap-3 mb-2">
+                <h1 class="text-4xl font-bold text-gray-800">Gestionar PDFs</h1>
+            </div>
+            <p class="text-gray-600">Carga, visualiza y elimina documentos PDF para tu índice de búsqueda</p>
+        </div>
+
+        <!-- Tarjeta de carga -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-6">Cargar nuevos PDFs</h2>
+            
+            <div class="border-2 border-dashed border-indigo-300 rounded-lg p-8 mb-6 hover:border-indigo-500 transition">
+                <input type="file" id="files" multiple accept=".pdf" class="w-full cursor-pointer" />
+                <p class="text-gray-500 text-sm mt-2">Selecciona uno o varios archivos PDF</p>
+            </div>
+
+            <button 
+                onclick="cargarPDFs()" 
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 mb-4"
+            >
+                ✓ Procesar y cargar PDFs
+            </button>
+
+            <!-- Progreso -->
+            <div id="progress" class="hidden mb-4">
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progressBar" class="bg-green-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <p id="progressText" class="text-center text-sm text-gray-600 mt-2">0%</p>
+            </div>
+
+            <!-- Mensaje de estado -->
+            <div id="message" class="hidden p-4 rounded-lg mb-4"></div>
+        </div>
+
+        <!-- Tarjeta de PDFs cargados -->
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-6">PDFs cargados</h2>
+            
+            <div id="filesList" class="space-y-3">
+                <div class="flex items-center justify-center py-12">
+                    <div class="text-center">
+                        <p class="text-gray-500 animate-pulse">Cargando lista de PDFs...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botón de limpiar índice -->
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <button 
+                    onclick="limpiarIndice()" 
+                    class="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg transition duration-200"
+                >
+                    Limpiar todo el índice
+                </button>
+                <p class="text-gray-500 text-sm mt-2">Esto eliminará todos los documentos de la memoria</p>
+            </div>
+        </div>
+
+        <!-- Navegación -->
+        <div class="mt-8 text-center">
+            <a href="/" class="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-700 font-semibold">
+                ← Volver al chatbot
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Cargar lista de PDFs al iniciar
+        document.addEventListener('DOMContentLoaded', cargarListaPDFs);
+
+        async function cargarListaPDFs() {
+            try {
+                const resp = await fetch('/list-pdfs');
+                const data = await resp.json();
+                const filesList = document.getElementById('filesList');
+
+                if (!data.files || data.files.length === 0) {
+                    filesList.innerHTML = `
+                        <div class="text-center py-12">
+                            <p class="text-gray-500 text-lg">No hay PDFs cargados aún</p>
+                            <p class="text-gray-400 text-sm mt-2">Carga tu primer PDF para comenzar</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                filesList.innerHTML = data.files.map((archivo, idx) => `
+                    <div class="flex items-center justify-between bg-gradient-to-r from-indigo-50 to-blue-50 p-4 rounded-lg border border-indigo-200 hover:border-indigo-400 transition">
+                        <div class="flex items-center gap-3">
+                            <span class="text-2xl">📑</span>
+                            <div>
+                                <p class="font-semibold text-gray-800">${archivo}</p>
+                                <p class="text-sm text-gray-500">PDF cargado</p>
+                            </div>
+                        </div>
+                        <button 
+                            onclick="eliminarPDF('${archivo}')" 
+                            class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
+                        >
+                            Eliminar
+                        </button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('filesList').innerHTML = `
+                    <div class="text-center py-12">
+                        <p class="text-red-500">Error al cargar la lista de PDFs</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function cargarPDFs() {
+            const input = document.getElementById('files');
+            if (!input.files || input.files.length === 0) {
+                mostrarMensaje('Por favor selecciona al menos un PDF', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            for (let file of input.files) {
+                formData.append('files', file);
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            document.getElementById('progress').classList.remove('hidden');
+            actualizarProgreso(0);
+
+            try {
+                const resp = await fetch('/upload-pdfs', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await resp.json();
+                
+                if (data.message) {
+                    actualizarProgreso(100);
+                    mostrarMensaje('✔ ' + data.message, 'success');
+                    input.value = '';
+                    setTimeout(cargarListaPDFs, 1000);
+                } else if (data.detail) {
+                    mostrarMensaje('✗ Error: ' + data.detail, 'error');
+                }
+            } catch (e) {
+                mostrarMensaje('✗ Error en la petición: ' + e, 'error');
+            } finally {
+                btn.disabled = false;
+                setTimeout(() => {
+                    document.getElementById('progress').classList.add('hidden');
+                }, 2000);
+            }
+        }
+
+        async function eliminarPDF(archivo) {
+            if (!confirm(`¿Estás seguro de eliminar "${archivo}"?`)) {
+                return;
+            }
+
+            try {
+                const resp = await fetch('/delete-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: archivo })
+                });
+
+                const data = await resp.json();
+                if (data.message) {
+                    mostrarMensaje('✔ ' + data.message, 'success');
+                    setTimeout(cargarListaPDFs, 500);
+                } else if (data.detail) {
+                    mostrarMensaje('✗ Error: ' + data.detail, 'error');
+                }
+            } catch (e) {
+                mostrarMensaje('✗ Error: ' + e, 'error');
+            }
+        }
+
+        async function limpiarIndice() {
+            if (!confirm('¿Eliminar todo el índice? Esta acción no se puede deshacer.')) {
+                return;
+            }
+
+            try {
+                const resp = await fetch('/clear-index', { method: 'POST' });
+                const data = await resp.json();
+                
+                if (data.message) {
+                    mostrarMensaje('✔ ' + data.message, 'success');
+                    setTimeout(cargarListaPDFs, 500);
+                }
+            } catch (e) {
+                mostrarMensaje('✗ Error: ' + e, 'error');
+            }
+        }
+
+        function actualizarProgreso(porcentaje) {
+            document.getElementById('progressBar').style.width = porcentaje + '%';
+            document.getElementById('progressText').textContent = porcentaje + '%';
+        }
+
+        function mostrarMensaje(texto, tipo) {
+            const msg = document.getElementById('message');
+            msg.textContent = texto;
+            
+            const colores = {
+                'success': 'bg-green-50 text-green-800 border border-green-300',
+                'error': 'bg-red-50 text-red-800 border border-red-300',
+                'info': 'bg-blue-50 text-blue-800 border border-blue-300'
+            };
+            
+            msg.className = 'p-4 rounded-lg ' + (colores[tipo] || colores.info);
+            msg.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
