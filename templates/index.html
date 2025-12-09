@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Chatbot de Documentos</title>
-        <style>
+            <style>
       body {
         font-family: system-ui, sans-serif;
         max-width: 900px;
@@ -37,21 +37,27 @@
       }
     </style>
 </head>
-<body>
+<body onload="loadPdfList()">
 
     <h1>Chatbot de Documentos FCyT</h1>
     
     <div>
-        <h2>Subir y Actualizar Índice (PDFs)</h2>
+        <h2>Agregar PDFs al Índice</h2>
         <form id="uploadForm">
-            <p>Selecciona uno o más PDFs para crear/reemplazar el índice de documentos.</p>
+            <p>Selecciona uno o más PDFs para **agregar** al índice existente.</p>
             <input type="file" id="pdfFiles" name="files" accept=".pdf" multiple required>
-            <button type="submit">Generar Nuevo Índice</button>
+            <button type="submit">Agregar y Regenerar Índice</button>
         </form>
         <div id="uploadMessage" class="message" style="display:none;"></div>
     </div>
-
-    <hr> <div>
+    <div>
+        <h2>Documentos Cargados</h2>
+        <div id="pdfListContainer">
+            <p>Cargando documentos...</p>
+        </div>
+        <div id="deleteMessage" class="message" style="display:none;"></div>
+    </div>
+    <div>
         <h2>Hacer una Pregunta</h2>
         <form id="askForm">
             <input type="text" id="question" placeholder="Escribe tu pregunta aquí..." required>
@@ -61,7 +67,76 @@
     </div>
 
     <script>
-        // --- Lógica para el Formulario de Subida ---
+        // --- FUNCIONES DE GESTIÓN DE PDFS ---
+        const pdfListContainer = document.getElementById('pdfListContainer');
+        const deleteMessage = document.getElementById('deleteMessage');
+
+        // Función para cargar la lista de PDFs
+        async function loadPdfList() {
+            try {
+                const response = await fetch('/list-pdfs');
+                const data = await response.json();
+                
+                pdfListContainer.innerHTML = ''; // Limpiar lista
+                
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(filename => {
+                        const listItem = document.createElement('div');
+                        listItem.className = 'pdf-list-item';
+                        listItem.innerHTML = `
+                            <span>${filename}</span>
+                            <button class="delete-btn" data-filename="${filename}">Eliminar</button>
+                        `;
+                        pdfListContainer.appendChild(listItem);
+                    });
+
+                    // Añadir evento a los botones de eliminar
+                    document.querySelectorAll('.delete-btn').forEach(button => {
+                        button.addEventListener('click', handleDelete);
+                    });
+                } else {
+                    pdfListContainer.innerHTML = '<p>No hay documentos cargados actualmente.</p>';
+                }
+            } catch (error) {
+                pdfListContainer.innerHTML = '<p class="error">Error al cargar la lista de documentos.</p>';
+            }
+        }
+
+        // Función para manejar la eliminación
+        async function handleDelete(e) {
+            const filename = e.target.dataset.filename;
+            if (!confirm(`¿Estás seguro de que quieres eliminar '${filename}' y regenerar el índice?`)) {
+                return;
+            }
+
+            deleteMessage.style.display = 'block';
+            deleteMessage.className = 'message';
+            deleteMessage.innerHTML = `Eliminando ${filename} y regenerando índice...`;
+
+            try {
+                const response = await fetch('/delete-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: filename }),
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    deleteMessage.className = 'message success';
+                    deleteMessage.innerHTML = data.message;
+                    loadPdfList(); // Recargar la lista de archivos
+                } else {
+                    deleteMessage.className = 'message error';
+                    deleteMessage.innerHTML = 'Error al eliminar: ' + (data.detail || 'Fallo desconocido.');
+                }
+            } catch (error) {
+                deleteMessage.className = 'message error';
+                deleteMessage.innerHTML = 'Error de conexión durante la eliminación: ' + error.message;
+            }
+        }
+        
+        // --- Lógica para el Formulario de Subida (Modificada para recargar lista) ---
         const uploadForm = document.getElementById('uploadForm');
         const uploadMessage = document.getElementById('uploadMessage');
 
@@ -83,7 +158,7 @@
             
             uploadMessage.style.display = 'block';
             uploadMessage.className = 'message';
-            uploadMessage.innerHTML = 'Procesando archivos y generando índice... Esto puede tardar.';
+            uploadMessage.innerHTML = 'Procesando archivos, agregando al índice y regenerando...';
 
             try {
                 const response = await fetch('/upload-pdfs', {
@@ -97,6 +172,7 @@
                     uploadMessage.className = 'message success';
                     uploadMessage.innerHTML = data.message;
                     fileInput.value = ''; 
+                    loadPdfList(); // <-- ¡NUEVO! Recargar la lista después de subir
                 } else {
                     uploadMessage.className = 'message error';
                     uploadMessage.innerHTML = 'Error: ' + (data.detail || 'Fallo desconocido.');
@@ -107,7 +183,7 @@
             }
         });
 
-        // --- Lógica para el Formulario del Chatbot ---
+        // --- Lógica para el Formulario del Chatbot (sin cambios) ---
         const askForm = document.getElementById('askForm');
         const resultsDiv = document.getElementById('results');
 
@@ -124,9 +200,7 @@
             try {
                 const response = await fetch('/ask', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ question: question }),
                 });
 
@@ -154,6 +228,9 @@
                 resultsDiv.innerHTML = `<p style="color:red;">Error de conexión: ${error.message}</p>`;
             }
         });
+        
+        // Cargar la lista de PDFs al cargar la página
+        // La función `loadPdfList()` se llama con `onload` en la etiqueta <body>
     </script>
 
 </body>

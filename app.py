@@ -3,6 +3,7 @@ import numpy as np
 import re
 import os
 import io
+import json
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -11,18 +12,19 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
 import pypdf
 
-# Nombre del archivo del índice
-INDICE_PATH = "indice_tfidf.pkl"
+# Nombre de los archivos del índice (Se mantiene por referencia, pero NO se usa para guardar/cargar)
+INDICE_PATH = "indice_tfidf.pkl" 
 
-# Variables globales para el índice (se cargarán/actualizarán)
-documentos = []
+# Variables globales para el índice (Inician vacías y se vacían al reiniciar Uvicorn)
+documentos_activos = [] # Lista de fragmentos (chunks) {texto, fuente}
 vectorizer = None
 embeddings = None
 index_loaded = False
 
+app = FastAPI(title="Chatbot normativo FCyT")
 
-# ==== FUNCIONES DE PROCESAMIENTO DE PDF (Tomadas de procesar_pdf.py) ====
-
+# ==== FUNCIONES DE PROCESAMIENTO DE PDF (Sin cambios) ====
+# (extraer_texto y dividir_en_chunks permanecen iguales)
 def extraer_texto(pdf_file: io.BytesIO, filename: str):
     """Extrae texto de un PDF en memoria página por página."""
     try:
@@ -37,7 +39,6 @@ def extraer_texto(pdf_file: io.BytesIO, filename: str):
     except Exception as e:
         print(f"Error al leer PDF {filename}: {e}")
         return ""
-
 
 def dividir_en_chunks(texto, max_chars=500):
     """Divide texto largo en bloques (~500 caracteres aprox)."""
@@ -59,37 +60,27 @@ def dividir_en_chunks(texto, max_chars=500):
 
     return chunks
 
+# ==== GESTIÓN Y GENERACIÓN DEL ÍNDICE (SOLO EN MEMORIA) ====
 
-def generar_y_guardar_indice(archivos_subidos: list[UploadFile]):
-    """Procesa los archivos subidos, genera el nuevo índice TF-IDF y lo guarda."""
-    global documentos, vectorizer, embeddings, index_loaded
+# Renombramos la función y ELIMINAMOS el guardado en disco
+def generar_y_cargar_indice_en_memoria(current_documents: list):
+    """Genera el nuevo índice TF-IDF basado en la lista de documentos y LO CARGA EN MEMORIA."""
+    global documentos_activos, vectorizer, embeddings, index_loaded
     
-    documentos_nuevos = []
-    print("\n--- INICIANDO GENERACIÓN DE ÍNDICE ---")
+    documentos_activos = current_documents # Actualizar la lista activa
     
-    # 1. Extracción y Fragmentación
-    for archivo in archivos_subidos:
-        print(f"Procesando: {archivo.filename}")
-        # Leer el contenido del archivo en memoria
-        content = archivo.file.read()
-        pdf_file = io.BytesIO(content)
-        
-        texto = extraer_texto(pdf_file, archivo.filename)
-        chunks = dividir_en_chunks(texto)
+    if not documentos_activos:
+        print("La lista de documentos está vacía. Índice no generado.")
+        vectorizer = None
+        embeddings = None
+        index_loaded = False
+        return True
 
-        for chunk in chunks:
-            documentos_nuevos.append({"texto": chunk, "fuente": archivo.filename})
-            
-    if not documentos_nuevos:
-        print("No se extrajo texto de los documentos subidos. Índice no actualizado.")
-        # Retornar False si no se pudo generar el índice
-        return False
+    print(f"\nGenerando índice con un total de {len(documentos_activos)} fragmentos...")
+    
+    texts = [d["texto"] for d in documentos_activos]
 
-    print(f"Total de fragmentos: {len(documentos_nuevos)}")
-    texts = [d["texto"] for d in documentos_nuevos]
-
-    # 2. Crear Matriz TF-IDF
-    print("Generando matriz TF-IDF...")
+    # Crear Matriz TF-IDF
     vectorizer_nuevo = TfidfVectorizer(
         max_features=20000,
         ngram_range=(1, 2),
@@ -99,59 +90,29 @@ def generar_y_guardar_indice(archivos_subidos: list[UploadFile]):
     X = vectorizer_nuevo.fit_transform(texts)
     embeddings_nuevos = X.toarray().astype("float32")
     
-    print("Dimensión del espacio vectorial:", embeddings_nuevos.shape[1])
-
-    # 3. Guardar y Actualizar Globales
-    print("Guardando índice...")
-    data = {
-        "documentos": documentos_nuevos,
-        "vectorizer": vectorizer_nuevo,
-        "embeddings": embeddings_nuevos,
-    }
-
-    with open(INDICE_PATH, "wb") as f:
-        pickle.dump(data, f)
-        
-    # Actualizar las variables globales para el chatbot
-    documentos = documentos_nuevos
+    # *** ELIMINAMOS AQUÍ LA LÓGICA DE GUARDADO EN DISCO (pickle.dump) ***
+    
+    # Actualizar las variables globales
     vectorizer = vectorizer_nuevo
     embeddings = embeddings_nuevos
     index_loaded = True
     
-    print("✔ ¡Índice generado y cargado correctamente!")
+    print("✔ ¡Índice generado y cargado EN MEMORIA correctamente!")
     return True
 
-# ==== CARGA INICIAL DEL ÍNDICE ====
+# ==== ELIMINAMOS LA CARGA INICIAL ====
+# Eliminamos completamente la función cargar_indice_inicial() y su llamada para asegurar
+# que el índice esté vacío al iniciar el servidor.
 
-def cargar_indice_inicial():
-    """Carga el índice TF-IDF al iniciar la app si existe."""
-    global documentos, vectorizer, embeddings, index_loaded
-    if Path(INDICE_PATH).exists():
-        print(f"Cargando índice desde {INDICE_PATH}...")
-        try:
-            with open(INDICE_PATH, "rb") as f:
-                data = pickle.load(f)
-            documentos = data["documentos"]
-            vectorizer = data["vectorizer"]
-            embeddings = data["embeddings"]
-            index_loaded = True
-            print(f"Índice cargado con {len(documentos)} fragmentos.")
-        except Exception as e:
-            print(f"Error al cargar el índice: {e}. Inicie la app sin índice.")
-    else:
-        print("Índice no encontrado. Por favor, sube PDFs para crearlo.")
 
-cargar_indice_inicial()
-
-# ==== LÓGICA DE BÚSQUEDA (sin cambios) ====
-
+# ==== LÓGICA DE BÚSQUEDA (sin cambios en la lógica) ====
 def buscar_respuesta(pregunta: str, k: int = 3):
     """Devuelve los k fragmentos más similares a la pregunta."""
-    # ... (El código de la función buscar_respuesta es el mismo que tienes) ...
-    
     if not index_loaded:
         return [{"texto": "El índice de documentos no está cargado. Por favor, sube un PDF para generar el índice.", "fuente": "Sistema", "score": 0.0}]
-
+    
+    # [ ... Resto de la lógica de búsqueda sin cambios ... ]
+    
     q_vec = vectorizer.transform([pregunta]).toarray().astype("float32")
     sims = cosine_similarity(q_vec, embeddings)[0]
 
@@ -159,23 +120,22 @@ def buscar_respuesta(pregunta: str, k: int = 3):
 
     resultados = []
     for idx in idxs:
-        doc = documentos[idx]
+        doc = documentos_activos[idx] # Usar la lista activa
         texto = doc.get("texto", "")
 
-        # Dividir en oraciones (también separa por saltos de línea)
+        # Dividir en oraciones (el mismo código de segmentación de oraciones)
         oraciones = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', texto) if s.strip()]
 
-        snippet = texto  # fallback: todo el texto si algo falla
+        snippet = texto
         snippet_score = float(sims[idx])
 
-        if oraciones:
+        if oraciones and vectorizer: # Aseguramos que el vectorizer no es None
             try:
                 sent_vecs = vectorizer.transform(oraciones).toarray().astype("float32")
                 sent_sims = cosine_similarity(q_vec, sent_vecs)[0]
                 best_i = int(np.argmax(sent_sims))
                 best_sentence = oraciones[best_i].strip()
 
-                # Añadir la siguiente oración como contexto si la frase es muy corta
                 if len(best_sentence) < 100 and best_i + 1 < len(oraciones):
                     best_sentence = best_sentence + " " + oraciones[best_i + 1].strip()
 
@@ -193,29 +153,40 @@ def buscar_respuesta(pregunta: str, k: int = 3):
             }
         )
 
-    # Ordenar los resultados por score descendente (score más alto primero)
     resultados.sort(key=lambda r: r["score"], reverse=True)
 
     return resultados
 
-
 # ==== MODELOS DE ENTRADA / SALIDA (sin cambios) ====
-
 class Question(BaseModel):
     question: str
+    
+class DocumentToDelete(BaseModel):
+    filename: str
 
-
-# ==== RUTAS ====
-
-app = FastAPI(title="Chatbot normativo FCyT")
-
+# ==== RUTAS DE GESTIÓN Y CHATBOT ====
 
 @app.get("/", response_class=HTMLResponse)
 def home():
+    """
+    Ruta raíz que borra el índice de la memoria y sirve el HTML.
+    Esto asegura que al recargar la página, el índice siempre esté vacío.
+    """
+    global documentos_activos, vectorizer, embeddings, index_loaded
+    
+    # *** LÓGICA DE BORRADO AUTOMÁTICO AL CARGAR LA PÁGINA ***
+    if index_loaded:
+        documentos_activos = []
+        vectorizer = None
+        embeddings = None
+        index_loaded = False
+        print("Índice en memoria vaciado automáticamente al cargar la página.")
+
     # Servir el HTML desde templates/index.html
     path = Path(__file__).parent / "templates" / "index.html"
     if path.exists():
         return HTMLResponse(content=path.read_text(encoding="utf-8"))
+    
     return HTMLResponse(content="<p>Index not found</p>", status_code=404)
 
 
@@ -224,31 +195,93 @@ def ask(q: Question):
     resultados = buscar_respuesta(q.question, k=3)
     return {"resultados": resultados}
 
+@app.get("/list-pdfs")
+def list_pdfs():
+    """Devuelve la lista única de nombres de archivos cargados."""
+    if not documentos_activos:
+        return {"files": []}
+    
+    # Obtener nombres de archivo únicos de todos los fragmentos
+    fuentes_unicas = sorted(list(set(d["fuente"] for d in documentos_activos)))
+    return {"files": fuentes_unicas}
+
 
 @app.post("/upload-pdfs")
 async def upload_pdfs(files: list[UploadFile] = File(...)):
-    """Ruta para subir archivos PDF y regenerar el índice."""
+    """Sube nuevos PDFs, los añade a la lista activa y regenera el índice."""
     if not files:
         raise HTTPException(status_code=400, detail="No se subió ningún archivo.")
 
-    # Filtrar solo PDFs
-    pdfs = [f for f in files if f.filename and f.filename.lower().endswith(".pdf")]
+    pdfs_procesados = []
     
-    if not pdfs:
-        raise HTTPException(status_code=400, detail="No se subió ningún archivo PDF válido.")
-
-    try:
-        # Esto procesa los archivos subidos, guarda el nuevo índice
-        # y actualiza las variables globales (documentos, vectorizer, embeddings)
-        if generar_y_guardar_indice(pdfs):
-            return JSONResponse(
-                content={"message": f"PDFs subidos"},
-                status_code=200
-            )
-        else:
-            raise HTTPException(status_code=500, detail="Los archivos se subieron, pero falló la generación del índice (posiblemente por no extraer texto).")
+    # 1. Procesar nuevos archivos y extraer fragmentos
+    for archivo in files:
+        if archivo.filename and archivo.filename.lower().endswith(".pdf"):
+            print(f"Añadiendo PDF: {archivo.filename}")
+            content = archivo.file.read()
+            pdf_file = io.BytesIO(content)
             
-    except Exception as e:
-        # Asegúrate de capturar cualquier error durante el procesamiento
-        print(f"Error en la subida y procesamiento: {e}")
-        raise HTTPException(status_code=500, detail=f"Error interno al procesar los archivos: {str(e)}")
+            texto = extraer_texto(pdf_file, archivo.filename)
+            chunks = dividir_en_chunks(texto)
+
+            for chunk in chunks:
+                pdfs_procesados.append({"texto": chunk, "fuente": archivo.filename})
+    
+    if not pdfs_procesados:
+        raise HTTPException(status_code=400, detail="No se subió ningún archivo PDF válido o no se pudo extraer texto.")
+
+    # 2. Combinar con los documentos activos existentes
+    nueva_lista_documentos = documentos_activos + pdfs_procesados
+    
+    # 3. Generar y cargar el nuevo índice completo (¡USAMOS LA FUNCIÓN EN MEMORIA!)
+    if generar_y_cargar_indice_en_memoria(nueva_lista_documentos):
+        return JSONResponse(
+            content={"message": f"Éxito: Se subieron {len(pdfs_procesados)} fragmentos nuevos y se regeneró el índice con {len(documentos_activos)} fragmentos totales."},
+            status_code=200
+        )
+    else:
+        raise HTTPException(status_code=500, detail="Fallo la generación del índice.")
+
+
+@app.post("/delete-pdf")
+def delete_pdf(data: DocumentToDelete):
+    """Elimina todos los fragmentos asociados a un nombre de archivo y regenera el índice."""
+    filename_to_delete = data.filename
+    
+    if not filename_to_delete:
+        raise HTTPException(status_code=400, detail="Se requiere el nombre del archivo a eliminar.")
+
+    # 1. Filtrar los documentos activos, excluyendo los del archivo a eliminar
+    documentos_restantes = [d for d in documentos_activos if d["fuente"] != filename_to_delete]
+    
+    if len(documentos_restantes) == len(documentos_activos):
+        raise HTTPException(status_code=404, detail=f"Archivo '{filename_to_delete}' no encontrado en el índice.")
+
+    # 2. Generar y cargar el nuevo índice con los documentos restantes (¡USAMOS LA FUNCIÓN EN MEMORIA!)
+    if generar_y_cargar_indice_en_memoria(documentos_restantes):
+        return JSONResponse(
+            content={"message": f"Éxito: Archivo '{filename_to_delete}' eliminado. Índice regenerado con {len(documentos_restantes)} fragmentos."},
+            status_code=200
+        )
+    else:
+        raise HTTPException(status_code=500, detail="Fallo la regeneración del índice después de la eliminación.")
+    
+    # ... (Después de las otras rutas) ...
+
+@app.post("/clear-index")
+def clear_index():
+    """Borra todos los documentos, el vectorizador y el índice de la memoria RAM."""
+    global documentos_activos, vectorizer, embeddings, index_loaded
+    
+    # Limpiar todas las variables globales
+    documentos_activos = []
+    vectorizer = None
+    embeddings = None
+    index_loaded = False
+    
+    print("✔ Índice en memoria borrado exitosamente.")
+    
+    return JSONResponse(
+        content={"message": "Índice en memoria vaciado y listo para nuevos documentos."},
+        status_code=200
+    )
