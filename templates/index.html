@@ -12,13 +12,16 @@
         <div class="mb-8">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-3">
-                    <h1 class="text-4xl font-bold text-gray-800">Chatbot Normativo</h1>
+                    <div>
+                        <h1 class="text-4xl font-bold text-gray-800">Chatbot Normativo</h1>
+                        <p class="text-sm text-gray-500">Búsqueda inteligente con IA</p>
+                    </div>
                 </div>
-                <a href="/manage-pdfs" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+                <a href="/manage-pdfs" class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md hover:shadow-lg">
                     Gestionar PDFs
                 </a>
             </div>
-            <p class="text-gray-600">Preguntá sobre reglamento académico o de PFG - Búsqueda con IA</p>
+            <p class="text-gray-600">Preguntá sobre reglamento académico o de PFG</p>
         </div>
 
         <!-- Tarjeta principal -->
@@ -31,14 +34,17 @@
                     id="question" 
                     placeholder="Ej: ¿Cuál es la función del docente de la materia PFG?"
                     class="w-full h-24 p-4 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition resize-none"
+                    onkeypress="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); enviarPregunta(); }"
                 ></textarea>
+                <p class="text-xs text-gray-500 mt-2">💡 Tip: Presiona Enter para buscar, Shift+Enter para nueva línea</p>
             </div>
 
             <button 
                 onclick="enviarPregunta()" 
-                class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md hover:shadow-lg"
+                id="btnConsultar"
+                class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
-                Consultar
+                Buscar Respuesta
             </button>
 
             <!-- Resultado -->
@@ -47,7 +53,7 @@
 
         <!-- Footer -->
         <div class="text-center text-gray-500 text-sm">
-            <p>Versión demo basada en búsqueda semántica con TF-IDF</p>
+            <p>🚀 Búsqueda semántica híbrida con Sentence Transformers + TF-IDF</p>
         </div>
     </div>
 
@@ -55,13 +61,19 @@
         async function enviarPregunta() {
             const q = document.getElementById("question").value.trim();
             const contResultados = document.getElementById("resultados");
+            const btnConsultar = document.getElementById("btnConsultar");
+            
             contResultados.innerHTML = "";
 
             if (!q) {
-                mostrarError("Escribí una pregunta");
+                mostrarError("Por favor, escribí una pregunta");
                 return;
             }
 
+            // Deshabilitar botón durante la búsqueda
+            btnConsultar.disabled = true;
+            btnConsultar.innerHTML = "⏳ Buscando...";
+            
             mostrarCargando();
 
             try {
@@ -72,48 +84,134 @@
                 });
 
                 if (!resp.ok) {
-                    mostrarError("Error al consultar el servidor");
-                    return;
+                    throw new Error(`Error del servidor: ${resp.status}`);
                 }
 
                 const data = await resp.json();
                 contResultados.innerHTML = "";
 
-                if (data.resultados && data.resultados.length > 0) {
-                    data.resultados.forEach((r, i) => {
-                        const textoCorto = r.texto.length > 500
-                            ? r.texto.slice(0, 500) + "..."
-                            : r.texto;
-
-                        const div = document.createElement("div");
-                        div.className = "mt-6 p-6 bg-gradient-to-r from-indigo-50 to-blue-50 border-l-4 border-indigo-600 rounded-lg shadow-md";
-                        div.innerHTML = `
-                            <div class="flex items-start justify-between mb-3">
-                                <div>
-                                    <span class="inline-block bg-indigo-600 text-white font-bold rounded-full w-8 h-8 flex items-center justify-center mr-3">${i+1}</span>
-                                    <span class="font-semibold text-gray-800">${r.fuente}</span>
+                // Verificar que existe el resultado
+                if (data.resultado && data.resultado.texto) {
+                    const r = data.resultado;
+                    
+                    // Extraer metadatos si existen
+                    let metadatosHTML = "";
+                    if (r.metadatos) {
+                        const tags = [];
+                        if (r.metadatos.capitulo) tags.push(`📖 Capítulo ${r.metadatos.capitulo}`);
+                        if (r.metadatos.articulo) tags.push(`📜 Artículo ${r.metadatos.articulo}`);
+                        if (r.metadatos.seccion) tags.push(`📑 Sección ${r.metadatos.seccion}`);
+                        
+                        if (tags.length > 0) {
+                            metadatosHTML = `
+                                <div class="flex flex-wrap gap-2 mb-4">
+                                    ${tags.map(tag => `<span class="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">${tag}</span>`).join('')}
                                 </div>
-                                <span class="text-xs bg-gray-200 text-gray-700 px-3 py-1 rounded-full">Score: ${r.score.toFixed(3)}</span>
+                            `;
+                        }
+                    }
+
+                    // Construir la respuesta
+                    const div = document.createElement("div");
+                    div.className = "bg-gradient-to-br from-white to-indigo-50 border-2 border-indigo-200 rounded-xl shadow-xl p-6 animate-fadeIn";
+                    
+                    // Calcular confianza basada en score
+                    let confianzaColor = "gray";
+                    let confianzaTexto = "Baja";
+                    let confianzaEmoji = "🤔";
+                    
+                    if (r.score >= 0.7) {
+                        confianzaColor = "green";
+                        confianzaTexto = "Alta";
+                        confianzaEmoji = "✅";
+                    } else if (r.score >= 0.5) {
+                        confianzaColor = "yellow";
+                        confianzaTexto = "Media";
+                        confianzaEmoji = "⚠️";
+                    } else {
+                        confianzaColor = "red";
+                        confianzaTexto = "Baja";
+                        confianzaEmoji = "❓";
+                    }
+
+                    div.innerHTML = `
+                        <!-- Header con fuente y score -->
+                        <div class="flex items-start justify-between mb-4 pb-4 border-b border-indigo-200">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-md">
+                                    📄
+                                </div>
+                                <div>
+                                    <p class="font-bold text-gray-800 text-lg">${r.fuente || "Documento"}</p>
+                                    <p class="text-xs text-gray-500">Mejor coincidencia encontrada</p>
+                                </div>
                             </div>
-                            <p class="text-gray-700 leading-relaxed">${textoCorto.replace(/\n/g, " ")}</p>
-                        `;
-                        contResultados.appendChild(div);
-                    });
+                            <div class="text-right">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="text-xs font-medium text-gray-600">Confianza:</span>
+                                    <span class="text-xs font-bold px-3 py-1 rounded-full bg-${confianzaColor}-100 text-${confianzaColor}-700">
+                                        ${confianzaEmoji} ${confianzaTexto}
+                                    </span>
+                                </div>
+                                <p class="text-xs text-gray-400">Score: ${r.score.toFixed(3)}</p>
+                            </div>
+                        </div>
+
+                        <!-- Metadatos (si existen) -->
+                        ${metadatosHTML}
+
+                        <!-- Respuesta principal -->
+                        <div class="bg-white rounded-lg p-5 shadow-inner">
+                            <p class="text-gray-800 leading-relaxed text-base whitespace-pre-wrap">${formatearTexto(r.texto)}</p>
+                        </div>
+
+                        <!-- Nota informativa -->
+                        <div class="mt-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
+                            <p class="text-xs text-blue-800">
+                                💡 <strong>Nota:</strong> Esta es la respuesta más relevante encontrada en los documentos indexados. 
+                                ${r.score < 0.5 ? 'La confianza es baja, verifica la información.' : 'Revisa el documento completo para más contexto.'}
+                            </p>
+                        </div>
+                    `;
+                    
+                    contResultados.appendChild(div);
                 } else {
-                    mostrarError("No se encontraron resultados");
+                    mostrarError("No se encontraron resultados relevantes para tu consulta");
                 }
 
             } catch (e) {
-                mostrarError("Error en la petición: " + e);
+                console.error(e);
+                mostrarError("Error al consultar: " + e.message);
+            } finally {
+                // Rehabilitar botón
+                btnConsultar.disabled = false;
+                btnConsultar.innerHTML = "Buscar Respuesta";
             }
+        }
+
+        function formatearTexto(texto) {
+            // Escapar HTML
+            texto = texto.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            
+            // Resaltar números de artículos/capítulos si no están en metadatos
+            texto = texto.replace(/\b(Artículo|Capítulo|Sección)\s+(\d+|[IVXLCDM]+)\b/gi, 
+                '<strong class="text-indigo-700">$1 $2</strong>');
+            
+            return texto;
         }
 
         function mostrarCargando() {
             const contResultados = document.getElementById("resultados");
             contResultados.innerHTML = `
-                <div class="mt-8 flex items-center justify-center">
-                    <div class="animate-spin">⏳</div>
-                    <p class="ml-3 text-gray-600">Buscando respuesta...</p>
+                <div class="flex flex-col items-center justify-center py-12">
+                    <div class="relative">
+                        <div class="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                        <div class="absolute inset-0 flex items-center justify-center text-2xl">
+                            🔍
+                        </div>
+                    </div>
+                    <p class="mt-4 text-gray-600 font-medium">Analizando documentos...</p>
+                    <p class="text-sm text-gray-400">Esto puede tomar unos segundos</p>
                 </div>
             `;
         }
@@ -121,11 +219,50 @@
         function mostrarError(mensaje) {
             const contResultados = document.getElementById("resultados");
             contResultados.innerHTML = `
-                <div class="mt-8 p-4 bg-red-50 text-red-800 border border-red-300 rounded-lg">
-                    ⚠️ ${mensaje}
+                <div class="bg-red-50 border-l-4 border-red-500 rounded-lg p-6 shadow-md animate-fadeIn">
+                    <div class="flex items-start gap-3">
+                        <div class="text-3xl">⚠️</div>
+                        <div>
+                            <h3 class="font-bold text-red-800 text-lg mb-1">Error</h3>
+                            <p class="text-red-700">${mensaje}</p>
+                            <p class="text-sm text-red-600 mt-2">
+                                💡 Asegurate de que hay PDFs cargados en el sistema.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             `;
         }
+
+        // Auto-focus en el textarea al cargar
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('question').focus();
+        });
     </script>
+
+    <style>
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fadeIn {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        /* Mejorar colores de confianza */
+        .bg-green-100 { background-color: #d1fae5; }
+        .text-green-700 { color: #047857; }
+        .bg-yellow-100 { background-color: #fef3c7; }
+        .text-yellow-700 { color: #b45309; }
+        .bg-red-100 { background-color: #fee2e2; }
+        .text-red-700 { color: #b91c1c; }
+    </style>
 </body>
 </html>
