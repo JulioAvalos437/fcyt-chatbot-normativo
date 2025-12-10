@@ -1,4 +1,4 @@
-Perfecto.
+
 # Chatbot Normativo FCyT – Baseline 2025
 
 Este proyecto implementa un **chatbot normativo** para la Facultad de Ciencias y Tecnologías (FCyT – UNCA), que permite realizar consultas sobre reglamentos y documentos institucionales a partir de archivos PDF.  
@@ -9,24 +9,34 @@ El objetivo de esta versión es proporcionar un **baseline funcional y extensibl
 
 ## 🧭 ¿Qué hace este sistema?
 
-El proyecto permite consultar documentos normativos de la FCyT utilizando preguntas en lenguaje natural. Para lograrlo, el sistema:
+Este proyecto permite realizar búsquedas inteligentes dentro de los documentos normativos de la FCyT utilizando preguntas en lenguaje natural. Para ello, el sistema realiza los siguientes pasos:
 
-1. **Carga todos los PDFs** ubicados en la carpeta `docs/`.
-2. **Extrae el texto** de cada documento.
-3. **Divide el contenido en fragmentos** (chunks) manejables.
-4. **Convierte cada fragmento en un vector numérico** mediante la técnica TF-IDF (Term Frequency – Inverse Document Frequency).
-5. **Construye un índice de búsqueda local**, sin depender de servicios externos.
-6. Cuando el usuario realiza una consulta:
-   - La pregunta se vectoriza.
-   - Se calcula la similitud entre la pregunta y cada fragmento del corpus.
-   - Se devuelven los fragmentos más relevantes, indicando el documento de origen.
+1. **Carga de documentos:** El sistema **espera** a que el usuario proporcione los archivos PDF.
+2. **Extracción de texto:** Se extrae el texto completo de cada PDF cargado.
+3. **Fragmentación:** El contenido se divide en fragmentos (chunks) para facilitar la indexación y la recuperación.
+4. **Indexación mixta (híbrida):**
 
-Este enfoque garantiza que el sistema:
+   * Se mantiene una representación basada en **TF-IDF** (útil para coincidencias exactas y búsquedas por términos/claves).
+   * Paralelamente, se generan **embeddings densos** para cada fragmento usando un modelo preentrenado (`paraphrase-multilingual-MiniLM-L12-v2`).
+   * Ambos tipos de representaciones conforman un índice local híbrido, **sin depender de servicios externos**.
+5. **Búsqueda y recuperación:** Cuando llega una consulta:
 
-- **Nunca inventa información**,  
-- **Siempre responde con texto real proveniente de los documentos**,  
-- **Funciona completamente offline** una vez instalado,  
-- Y constituye una base sólida para futuras mejoras en búsqueda semántica, interfaces y asistentes inteligentes.
+   * La pregunta se transforma tanto a TF-IDF como a embedding.
+   * Se calculan **scores TF-IDF** y **scores densos (embeddings)** por similitud (p. ej. coseno).
+   * Se combina un score híbrido que pondera TF-IDF y embeddings según el tipo de consulta (p. ej. más peso a TF-IDF para definiciones o búsquedas de palabras clave, más peso a embeddings para búsquedas semánticas generales).
+   * Se selecciona un Top-K inicial según ese score combinado y se aplican reglas adicionales por tipo de contenido:
+
+     * **Definiciones:** devolver el bloque o párrafo completo (máximo contexto).
+     * **Procedimientos:** expandir con oraciones contiguas relevantes (más contexto operativo).
+     * **Búsqueda general:** seleccionar el párrafo más relevante y, si es necesario, recortar para limitar longitud.
+   * Además se aplican *boosts* basados en metadatos del documento (tipo de documento, etiquetas, prioridad institucional, etc.) antes de ordenar los candidatos finales.
+6. **Respuesta:** El sistema devuelve fragmentos textuales extraídos del corpus, indicando la fuente y metadatos asociados.
+
+### Garantías y límites
+
+* **No inventa información:** todas las respuestas provienen directamente del texto de los documentos cargados.
+* **Offline:** funciona localmente una vez instalados los modelos y dependencias.
+* **Extensible:** arquitectura pensada como baseline para mejorar la recuperación semántica, ajustar ponderaciones, añadir UI o servicios de QA más avanzados.
 
 ---
 
@@ -35,7 +45,6 @@ Este enfoque garantiza que el sistema:
 ### ✔ Python 3.11 (recomendado)
 
 Descarga oficial:
-
 - Windows 64-bit:  
   https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
 
@@ -73,30 +82,18 @@ Si aparece un error de permisos:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
-
 ### Linux / macOS
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
-
 ---
-
 ## 📦 3. Instalar dependencias
 
 ```bash
 pip install -r requirements.txt
 ```
-
-Esto instala:
-
-* fastapi
-* uvicorn
-* pypdf
-* numpy
-* scikit-learn
-* pydantic
+Esto instala los requerimientos detallados dentro del archivo
 
 ---
 
@@ -105,107 +102,101 @@ Esto instala:
 ```
 fcyt-chatbot-normativo/
 ├─ app.py
-├─ chatbot.py
-├─ procesar_pdfs.py
 ├─ requirements.txt
-├─ docs/                  # PDFs normativos
+├─ templates/
 └─ .gitignore
 ```
 
 ---
 
-## 🏗 5. Procesar los PDFs (generar el índice)
+## 🌐 5. Servidor web, carga de documentos y uso del chatbot
 
-Antes de hacer cualquier consulta, generar el índice TF-IDF:
-
-```bash
-python procesar_pdfs.py
-```
-
-Esto produce un archivo:
-
-```
-indice_tfidf.pkl
-```
-
-que contiene:
-
-* fragmentos de texto,
-* vectorizador TF-IDF,
-* matriz de similitudes.
-
-> Cada vez que se agreguen o cambien PDFs en `docs/`, se debe ejecutar nuevamente este comando.
-
----
-
-## 💬 6. Uso del chatbot en modo consola
-
-```bash
-python chatbot.py
-```
-
-Ejemplo de diálogo:
-
-```
-=== Chatbot normativo FCyT ===
-Pregunta: ¿Cuál es la función del docente de la materia PFG?
-```
-
-El sistema devolverá los fragmentos más relevantes y el documento correspondiente.
-
----
-
-## 🌐 7. Servidor web con FastAPI
-
-Levantar el servidor:
+Para iniciar el sistema, primero se debe levantar el servidor web con FastAPI:
 
 ```bash
 uvicorn app:app --reload --port 8000
 ```
 
-Abrir en el navegador:
+Luego abrir en el navegador:
 
 ```
 http://127.0.0.1:8000/
 ```
 
-La interfaz permite:
+Desde esta interfaz web se realizan **todas las operaciones principales del sistema**, tanto la administración de documentos como el uso del chatbot.
 
-* ingresar una pregunta,
-* enviarla al backend,
-* ver los fragmentos recuperados.
+---
+
+### 📥 5.1 Carga de documentos y generación del índice
+
+Antes de realizar consultas, el usuario debe cargar los PDF normativos.
+Esto se hace desde la sección **“Manage PDFs”** disponible en la interfaz.
+
+El flujo es el siguiente:
+
+1. **Subir archivos PDF:**
+   El usuario selecciona uno o varios archivos.
+   Al procesarse, el sistema:
+
+   * extrae el texto,
+   * fragmenta el contenido,
+   * genera embeddings densos,
+   * calcula representaciones TF-IDF,
+   * y finalmente construye un **índice híbrido**.
+
+   Este índice se guarda en el archivo:
+   **`indice_tfidf.pkl`**
+
+2. **Visualización del índice:**
+   La interfaz muestra la lista de documentos cargados con:
+
+   * nombre del archivo,
+   * tamaño,
+   * estado en el índice,
+   * opción para eliminarlos individualmente.
+
+3. **Limpieza del índice:**
+   Existe un botón para borrar todo el índice y comenzar desde cero.
+
+---
+
+### 💬 5.2 Uso del chatbot desde la interfaz
+
+Una vez generado el índice, se puede acceder a la sección principal del chatbot.
+
+En este apartado, el usuario puede:
+
+1. **Ingresar una pregunta en lenguaje natural**,
+2. **Enviar la consulta**,
+3. **Recibir el resultado del sistema**, que incluye:
+
+   * el **fragmento más relevante**,
+   * el **documento de origen**,
+   * el **score o confianza** de la coincidencia,
+   * y los metadatos relevantes.
+
+Las respuestas provienen **exclusivamente del contenido de los PDFs cargados**, garantizando fidelidad normativa.
+
+---
 
 Para detener el servidor:
 `CTRL + C`
 
 ---
 
-## 🧪 8. Objetivo académico del baseline
 
-Este proyecto sirve como punto de partida para que los estudiantes:
+## 🧪 6. Objetivo académico del baseline
 
-* comprendan los conceptos básicos de recuperación de información (IR),
-* experimenten con TF-IDF y búsqueda vectorial,
-* agreguen nuevos documentos normativos,
-* exploren técnicas más avanzadas de extracción,
-* mejoren la interfaz de usuario,
-* integren modelos locales o remotos para enriquecer las respuestas,
-* transformen el prototipo en una herramienta más inteligente y completa.
+Este proyecto funciona como una base práctica para que los estudiantes:
 
----
-
-## 🛠 9. Problemas frecuentes y soluciones
-
-* **Error: `indice_tfidf.pkl` no encontrado**
-  → Ejecutar `python procesar_pdfs.py`.
-
-* **El sistema no devuelve respuestas útiles**
-  → Verificar que los PDFs sean digitales y no escaneados.
-  → Regenerar el índice.
-
-* **`uvicorn` no se reconoce**
-  → El entorno virtual no está activado.
-  → Verificar instalación con `pip install -r requirements.txt`.
+* comprendan cómo funciona un **sistema de búsqueda híbrido** que combina TF-IDF y embeddings semánticos,
+* experimenten con técnicas de recuperación de información (IR) aplicadas a documentos normativos reales,
+* practiquen la **carga, indexación y administración** de documentos desde una interfaz web,
+* entiendan cómo se construyen índices locales sin depender de servicios externos,
+* modifiquen la lógica de **clasificación de preguntas**, ponderación de scores y estrategias diferenciadas (definiciones, procedimientos, búsquedas generales),
+* mejoren la interfaz del chatbot y la gestión de documentos,
+* incorporen nuevos modelos de embeddings o integrar modelos externos/locales para extender las capacidades del sistema,
+* optimicen la calidad de las respuestas, agreguen visualizaciones o creen nuevas funcionalidades para el examen final o hackathon académico.
 
 ---
 
